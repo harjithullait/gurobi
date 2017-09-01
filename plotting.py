@@ -1,4 +1,4 @@
-'''Notes for v15: TO DO: (1) reduce the interval axis to pack all the maintenance for that specific station. One way of doing this would be to use the intervals per station, plot the length of these as the x-axis and then label them according to the values in the list. (2) plot a legend on the far right as a subplot spanning the whole 5 subplots vertically.'''
+ '''Notes for v15: TO DO: (1) reduce the interval axis to pack all the maintenance for that specific station. One way of doing this would be to use the intervals per station, plot the length of these as the x-axis and then label them according to the values in the list. (2) plot a legend on the far right as a subplot spanning the whole 5 subplots vertically.'''
 
 '''~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~GLOBAL ENVIRONMENT CALLS~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'''
 
@@ -10,6 +10,7 @@ import matplotlib.ticker as ticker
 
 '''~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Simple Functions~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'''
 
+# Harjit is amazing
 def dict_to_arrs(maintenance_dict, interval_ids, check_type, aircraft_list):
     '''Returns numpy arrays of for the intervals where maintenance of type 'check_type' is being performed, together with the aircraft is being performed on. Additionally gives the interval shift vector for plotting.'''
     maint_dict = {key : round(v,1) for key, v in maintenance_dict.iteritems()
