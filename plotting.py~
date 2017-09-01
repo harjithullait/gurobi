@@ -1,0 +1,95 @@
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.patches import Rectangle
+import matplotlib.patches as patches
+import matplotlib.ticker as ticker
+from matplotlib import gridspec
+
+def delete_first_two(arr):
+    arr = np.delete(arr, 0)
+    arr = np.delete(arr, 0)
+    return arr
+
+def dict_to_arrs(maintenance_dict, check_type):
+    maint_dict = {key : round(v,1) for key, v in maintenance_dict.iteritems()
+                  if key[2] == check_type} # key is a tuple (i,k)
+    maint_list = sorted(maint_dict.keys(), key = lambda x: x[0]) # list of [(key,value),...]
+    k_arr, i_arr, i_arr_shift = [], [], []
+    if len(maint_list) == 0:
+        print "No maintenance of type " + check_type + " has been scheduled"
+    else:
+        k_arr = np.array([k[1] for k in maint_list])
+        k_arr = np.delete(k_arr,0)
+        i_arr = np.array([k[0] for k in maint_list]) - 1
+        i_arr_shift = np.array([i+1 for i in i_arr])
+        i_arr = np.delete(i_arr,0)
+        i_arr_shift = np.delete(i_arr_shift, 0)
+    return k_arr, i_arr, i_arr_shift
+
+def get_patches(resource, intervals, maintenance_dict, n, b, check_t, cmap, color_index):
+    patches_list = []
+    for i in range(3,n):
+        height = 0
+        sub_dict = {key : round(v,1) for key, v in maintenance_dict.iteritems()
+                    if key[0] == i}
+        if len(sub_dict) == 0:
+            continue
+        else:
+            for c in check_t:
+                height = height + sum(v for k,v in sub_dict.iteritems() if k[2] == c)*b[(resource,c)]
+            patches_list.append(patches.Rectangle((i-1, 0), 1, height,
+                                                  color = cmap(color_index)))
+    return patches_list
+
+def get_cmap(n, name='hsv'):
+    '''Returns a function that maps each index in 0, 1, ..., n-1 to a distinct 
+    RGB color; the keyword argument name must be a standard mpl colormap name.'''
+    return plt.cm.get_cmap(name, n)
+
+def plot_performance_schedule(performance_dict, maintenance_dict, t, aircraft_dict, aircraft_list, n, m):
+    M = len(aircraft_dict.keys())
+    performance_dict = sorted(performance_dict.items(), key = lambda x: x[0]) 
+    ## Colouring ##
+    cmap = get_cmap(2*M)
+    ## First Plot ##
+    ax1 = plt.subplot(311, title = 'Performance Measure')
+    for plane in aircraft_dict.keys():
+        dummy_list = [k[1] for k in performance_dict if k[0][1] == plane]
+        plt.plot(range(n), dummy_list, label = str(plane ) + aircraft_list[plane], color = cmap(plane))
+    ax1.set_xlim([0,n])
+    ax1.set_title('Performance Measure')
+    plt.setp(ax1.get_xticklabels(), visible=False)
+    plt.legend()
+    plt.axhline(y=.4,ls = '--', color = 'r')
+    ## Second Plot ##
+    ax2 = plt.subplot(312, sharex=ax1, title = 'Check Type A')
+    A_k, A_i, A_i_shift = dict_to_arrs(maintenance_dict, 'A')
+    for axis in [ax2.xaxis, ax2.yaxis]:
+        axis.set_major_locator(ticker.MaxNLocator(integer=True))
+    plt.setp(ax2.get_xticklabels(), visible=False)
+    plt.hlines(A_k, A_i, A_i_shift, color = cmap(A_k))
+    ## Third Plot ##
+    ax3 = plt.subplot(313, sharex=ax1, sharey=ax2, title = 'Check Type C')
+    C_k, C_i, C_i_shift = dict_to_arrs(maintenance_dict, 'C')
+    plt.hlines(C_k, C_i, C_i_shift, color = cmap(C_k))
+    ## SHOW ##
+    plt.show()
+    return
+
+def plot_resources(maintenance_dict, t, aircraft_dict, aircraft_list, intervals, n, m, b, B, resources_list, check_t):
+    M = len(aircraft_dict.keys())
+    cmap = get_cmap(2*len(resources_list))
+    f, axarr = plt.subplots(len(resources_list), sharex=True)
+    for r in resources_list:
+        i = resources_list.index(r)
+        for axis in [axarr[i].xaxis, axarr[i].yaxis]:
+            axis.set_major_locator(ticker.MaxNLocator(integer=True))
+        axarr[i].set_ylim([0,B.get(max(B, key = lambda x: B.get(x)))])
+        axarr[i].set_xlim([0,n])
+        axarr[i].set_title('Resource '+ r)
+        ## Generate Rectangles ##
+        patches_list = get_patches(r, intervals, maintenance_dict, n, b, check_t, cmap, i)
+        for p in patches_list:
+            axarr[i].add_patch(p) # Plot them
+    plt.show()
+    return

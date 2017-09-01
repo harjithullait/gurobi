@@ -1,0 +1,175 @@
+"""
+GLOBAL ENVIRONMENT CALLS
+"""
+import gurobipy as grb
+
+def get_solutions(d,m,a):
+    """
+    Extract solution values for performance 'd'
+    """
+    d_v, m_v, a_v = {}, {}, {}
+    d_v = {k: float(v.x) for k,v in d.iteritems()}
+    m_v = {k: float(v.x) for k,v in m.iteritems() if v.x > 3e-12} #
+    # a_v = {k: float(v.x) for k,v in a.iteritems()}
+    return d_v, m_v, a_v
+
+def get_constants(intervals, D):
+    """
+    PARAMETERS and CONSTANTS
+    """
+    import time, random
+    ## Rates ##
+    r = [54e-9, 54e-9] # Improvement rate on perfomance measure for A r[0], or C r[1]
+    w = - 1e-9   # Degradation rate for flight operation
+    n = len(intervals)
+    M = 10e+17 # Big-M
+    check_t = ['A','C'] # Check Types
+    ## Interval Times ##
+    t = [int(time.mktime(intervals[i].start_t.timetuple())) for i in range(n)]
+    t.append(int(time.mktime(intervals[-1].end_t.timetuple())))
+    ## Resources ##
+    resources_list = ['r1', 'r2', 'r3', 'r4']
+    b = {('r1','A') : 1, ('r2','A') : 2, ('r3', 'A') : 0, ('r4','A') : 0, ('r1','C') : 1, ('r2','C') : 1, ('r3','C') : 1, ('r4', 'C') : 1}
+    req = [len(intervals[i].aircraft_l) for i in range(n)]
+    B = {(r,i) : 2*req[i] for i in range(n) for r in resources_list}
+    return r*D, w*D, n, M, check_t, t, resources_list, b, B
+
+def create_variables(model, aircraft_dict, check_t, n):
+    """
+    VARIABLES
+    """
+    d, a, m, C = {}, {}, {}, {}
+    d = model.addVars([(i,k) for k, v in aircraft_dict.iteritems() for i in v],
+                      vtype = "C", obj = 0, lb = 0.1, ub = 1.0, name = "d")
+    a = model.addVars([(i,k,c) for k, v in aircraft_dict.iteritems() for i in v
+                       for c in check_t], vtype = "C", obj = 0, name = "a")
+    m = model.addVars([(i,k,c) for k, v in aircraft_dict.iteritems() for i in v
+                       for c in check_t], vtype = "B", obj = 0, name = "m")
+    C = model.addVars([k for k in aircraft_dict.keys()], vtype = "B", obj = 0, name = "C")
+    model.update()
+    return model, d, a, m, C
+
+def fill_performance_dict(n = 0, d_dict = {}, aircraft_dict = {}, w = 0, t = []):
+    """
+    Using the performance solutions, we fill in for the variables not created for the lp.
+    """
+    dict_fill = {}
+    for plane in aircraft_dict.keys():
+        for i in range(n):
+            if (i,plane) in d_dict.keys():
+                dict_fill[(i,plane)] = float(d_dict[i,plane])
+            else:
+                dict_fill[(i,plane)] = dict_fill[(i-1,plane)] + w * (t[i] - t[i-1])
+    return dict_fill
+
+def intervals_per_plane(intervals = [], aircraft_list = []):
+    """
+    Generate dictionary
+    """
+    aircraft_dict = {aircraft_list.index(k) : [] for k in aircraft_list}
+    n = len(intervals)
+    for i in range(1,n):
+        for k in intervals[i].aircraft_l:
+            aircraft_dict[aircraft_list.index(k)].append(i)
+    aircraft_dict = {k : v for k, v in aircraft_dict.iteritems() if len(v) != 0}
+    final_dict = {}
+    for k,v in aircraft_dict.iteritems():
+        aircraft_dict[k].append(0)
+        aircraft_dict[k].append(n)
+        final_dict[k] = sorted(v)
+    return final_dict
+
+def optimise_and_save(model, d, m, a, aircraft_dict, aircraft_list, intervals, w = 0, n = 0, t = [], D = 0, b = {}, B = {}, resources_list = [], check_t = []):
+    """
+    Optimises and writes the solution to a csv file
+    """
+    from plotting import plot_performance_schedule, plot_resources
+    ## OPTIMISE ##
+    model.optimize()
+    ## SAVE ##
+    print "\n \n OUTPUTS"
+    print "Saving solution"
+    model.write("./output/solution"+str(D)+".sol")
+    print "Saving lp"
+    model.write("./output/linear_program"+str(D)+".lp")
+    
+    performance_v, maintenance_v, a_v = get_solutions(d,m,a)
+    performance = fill_performance_dict(n, performance_v, aircraft_dict, w, t)
+    ## PLOT ##
+    plot_performance_schedule(performance, maintenance_v, t, aircraft_dict, aircraft_list, n, int(model.ObjVal))
+    plot_resources(maintenance_v, t, aircraft_dict, aircraft_list, intervals, n, m, b, B, resources_list, check_t)
+    return
+
+def formulation(model, intervals = [], aircraft_list = [], aircraft_dict = {}, D = 0):
+    """
+    Formulate model according to Formulation_v5.pdf.
+    """
+    import random # for random uniform
+    from intervals import previous_and_next
+    ## CONSTANTS ##
+    r, w, n, M, check_t, t, resources_list, b, B = get_constants(intervals, D)
+    ## VARIABLES ##
+    model, d, a, m, C = create_variables(model, aircraft_dict, check_t, n)
+    ## INITIALISATIONS ##
+    for k, v in aircraft_dict.iteritems(): # Performance Measure - d
+        model.addConstr(d[n,k] >= 0.4*C[k] , name = "ServiceLevel_c[%s]"%(k))
+        model.addConstr(d[0,k] == random.uniform(0.4,0.4), name = "Initialisation_d[%s]"%(k))
+        model.addConstrs((a[v[0],k,c] == 0 for c in check_t), name = "Initialisation_a[%s]"%(k))
+    model.update()
+    
+    ## OBJECTIVE FUNCTION ##
+    coef = [1 for k in aircraft_dict.keys()]
+    var = [C[k] for k in aircraft_dict.keys()]
+    model.setObjective(grb.LinExpr(coef,var),-1)
+    model.update()
+    
+    ## CONSTRAINTS ##
+    for k, v in aircraft_dict.iteritems():
+        for i_prevs, i, i_next in previous_and_next(v):
+            if i_prevs is None: # First interval (None, i, i_next)
+                i_prevs = 0
+            elif i_next is None or i_next == n or i == n: # Last interval (i_prevs, i, None)
+                model.addConstr(d[n,k] <= d[i, k] + w * (t[-1] - t[i_prevs]), name = "PerformanceEnd[%s,%s]"%(i,k))
+                break
+            model.addConstr(d[i_next,k] <= d[i, k] + (t[i+1] - t[i])*(m[i,k,'A']*r[0] + m[i,k,'C']*r[1]) + w * (t[i_next] - t[i])*(1 - m[i,k,'A'] - m[i,k,'C']),
+                            name = "PerformanceGain[%s,%s]"%(i,k))
+            model.addConstr(m[i,k,'A'] + m[i,k,'C'] <= 1, name="4.1s")
+            model.addConstr(d[i_next,k] >= 0.2, name = "PrereqFlight[%s,%s]"%(i,k))
+            model.addConstrs((a[i,k,c] <= a[i_next,k,c] for c in check_t), name="SeqProc")
+            model.addConstrs((a[i_next,k,c] >= a[i,k,c] + t[i+1]- t[i] - M*(1-m[i,k,c]) for c in check_t), name="Proc_or1") # Constraint 4.1(1)
+            model.addConstrs((a[i,k,c] >= a[i,k,c] + t[i+1]- t[i] - M*(1-m[i_prevs,k,c]) for c in check_t), name="Proc_or2") # Constraint 4.1(2)
+            model.addConstrs((m[i,k,c] >= m[i_prevs,k,c] for c in check_t), name="Seq")
+    model.update()
+    #       Resources
+    for i in range(n):
+        for r in resources_list:
+            coef_d = [b[(r,c)] for c in check_t for k in intervals[i].aircraft_l]
+            var_d = [m[i,aircraft_list.index(k),c] for c in check_t
+                     for k in intervals[i].aircraft_l]
+            model.addConstr(grb.LinExpr(coef_d, var_d), "<=", B[(r,i)], name = "Resources[%s]"%(i))
+    model.update()
+    optimise_and_save(model, d, m, a, aircraft_dict, aircraft_list, intervals, w, n, t, D, b, B, resources_list, check_t)
+    return model, w, n, t
+
+def main():
+    """
+    The main function
+    """
+    import os
+    import sys
+    import time
+    scriptpath = "../../flightradar24/v14"
+    sys.path.append(os.path.abspath(scriptpath))
+    from intervals import wrapper
+    start = time.time()
+    time_intervals, aircraft_set = wrapper() # gets input from 'intervals.py' in v13
+    aircraft_list = list(aircraft_set)
+    aircraft_dict = intervals_per_plane(time_intervals, aircraft_list)
+    D = 100
+    model = grb.Model("Interval-formulation2")
+    model, w, n, t = formulation(model, time_intervals, aircraft_list, aircraft_dict, D)
+    print str((time.time()-start)/60)+ " minutes to run the whole routine"
+    return
+
+if __name__ == '__main__':
+    main()
